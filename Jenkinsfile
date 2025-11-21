@@ -2,11 +2,11 @@ pipeline {
     agent any
 
     environment {
-        // Python installation from Jenkins Global Tools
         PYTHON = "/usr/bin/python3"
         VENV = "venv"
+
         DEPLOY_USER = "ubuntu"
-        DEPLOY_IP = "54.90.73.208"   // <-- replace with your Deployment Server Public IP
+        DEPLOY_IP = "54.90.73.208"       // <-- Replace with your Deployment Server Public IP
         DEPLOY_PATH = "/opt/apps"
     }
 
@@ -22,7 +22,9 @@ pipeline {
         stage('Setup Python Virtual Environment') {
             steps {
                 echo "Creating virtual environment..."
-                sh "${PYTHON} -m venv ${VENV}"
+                sh """
+                ${PYTHON} -m venv ${VENV}
+                """
             }
         }
 
@@ -42,6 +44,7 @@ pipeline {
                 echo "Running Pytest..."
                 sh """
                 . ${VENV}/bin/activate
+                export PYTHONPATH=\$(pwd)
                 pytest --junitxml=results.xml
                 """
             }
@@ -54,9 +57,12 @@ pipeline {
 
         stage('Package Application') {
             steps {
-                echo "Packaging the application..."
+                echo "Packaging application..."
                 sh """
-                tar -czf sample-app.tar.gz app/
+                rm -rf package
+                mkdir -p package
+                cp -r app package/
+                tar -czf sample-app.tar.gz -C package app
                 """
                 archiveArtifacts artifacts: 'sample-app.tar.gz', fingerprint: true
             }
@@ -75,7 +81,7 @@ pipeline {
 
         stage('Extract on Deployment Server') {
             steps {
-                echo "Extracting files on deployment server..."
+                echo "Extracting files on remote server..."
                 withCredentials([sshUserPrivateKey(credentialsId: 'deploy-key', keyFileVariable: 'SSH_KEY')]) {
                     sh """
                     ssh -o StrictHostKeyChecking=no -i $SSH_KEY ${DEPLOY_USER}@${DEPLOY_IP} "tar -xzf ${DEPLOY_PATH}/sample-app.tar.gz -C ${DEPLOY_PATH}/"
@@ -86,7 +92,7 @@ pipeline {
 
         stage('Restart Application Service') {
             steps {
-                echo "Restarting systemctl service on deployment server..."
+                echo "Restarting Python app service..."
                 withCredentials([sshUserPrivateKey(credentialsId: 'deploy-key', keyFileVariable: 'SSH_KEY')]) {
                     sh """
                     ssh -o StrictHostKeyChecking=no -i $SSH_KEY ${DEPLOY_USER}@${DEPLOY_IP} "sudo systemctl restart pythonapp"
